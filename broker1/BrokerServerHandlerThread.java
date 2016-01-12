@@ -44,7 +44,12 @@ public class BrokerServerHandlerThread extends Thread {
 
         /* process message */
         if (packetFromClient.type == BrokerPacket.BROKER_REQUEST) {
-          packetToClient.quote = (long) hm.get(packetFromClient.symbol);
+          try {
+            packetToClient.quote = (long) hm.get(packetFromClient.symbol);
+          }
+          catch (NullPointerException e) {
+            packetToClient.quote = (long) 0;
+          }
           System.out.println("From Client: " + packetFromClient.symbol);
 
           toClient.writeObject(packetToClient);
