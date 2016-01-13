@@ -1,29 +1,19 @@
 import java.net.*;
 import java.io.*;
 import java.util.*;
+import java.util.concurrent.*;
 
 public class BrokerServerHandlerThread extends Thread {
 
   private Socket socket = null;
-  private HashMap<String, Integer> hm = new HashMap<String, Integer>();
+  //private volatile ConcurrentHashMap<String, Integer> hm = new ConcurrentHashMap<String, Integer>();
+  private ConcurrentHashMap<String, Long> hm;
 
-  public BrokerServerHandlerThread(Socket socket) {
+  public BrokerServerHandlerThread(Socket socket, ConcurrentHashMap<String, Long> hm) {
     super("BrokerServerHandlerThread");
     this.socket = socket;
+    this.hm = hm;
     System.out.println("Created new Thread to handle client");
-
-    // Read the nasdaq quotes
-    try {
-      BufferedReader br = new BufferedReader(new FileReader("nasdaq"));
-      for (String line; (line = br.readLine()) != null; ) {
-        String[] tempLine = line.split(" ");
-        hm.put(tempLine[0], Integer.parseInt(tempLine[1]));
-      }
-    }
-    catch (IOException e) {
-      System.err.println("ERROR: Could not open nasdaq quotes!");
-      System.exit(-1);
-    }
   }
 
   public void run() {
@@ -45,15 +35,74 @@ public class BrokerServerHandlerThread extends Thread {
         /* process message */
         if (packetFromClient.type == BrokerPacket.BROKER_REQUEST) {
           try {
-            packetToClient.quote = (long) hm.get(packetFromClient.symbol);
+            long symbolExist = hm.get(packetFromClient.symbol);
+            packetToClient.quote = symbolExist;
           }
           catch (NullPointerException e) {
             packetToClient.quote = (long) 0;
           }
           System.out.println("From Client: " + packetFromClient.symbol);
-
           toClient.writeObject(packetToClient);
+          continue;
+        }
 
+        //Exchange messages
+        if (packetFromClient.type == BrokerPacket.EXCHANGE_ADD) {
+          //Check if the symbol is already there
+          try {
+            long symbolExist = hm.get(packetFromClient.symbol);
+            packetToClient = new BrokerPacket();
+            packetToClient.type = BrokerPacket.ERROR_SYMBOL_EXISTS;
+          }
+          catch (NullPointerException e) {
+            //Added to hashMap...
+            hm.put(packetFromClient.symbol, (long) 0);
+            packetToClient = new BrokerPacket();
+            packetToClient.type = BrokerPacket.EXCHANGE_REPLY;
+            packetToClient.exchange = "added.";
+          }
+          System.out.println("From Exchange: Add " + packetFromClient.symbol);
+          toClient.writeObject(packetToClient);
+          continue;
+        }
+        else if (packetFromClient.type == BrokerPacket.EXCHANGE_UPDATE) {
+          try {
+            long symbolExist = hm.get(packetFromClient.symbol);
+
+            if (packetFromClient.quote > 300 || packetFromClient.quote < 0) {
+              packetToClient = new BrokerPacket();
+              packetToClient.type = BrokerPacket.ERROR_OUT_OF_RANGE;
+            }
+            else {
+              hm.put(packetFromClient.symbol, packetFromClient.quote);
+              packetToClient = new BrokerPacket();
+              packetToClient.type = BrokerPacket.EXCHANGE_REPLY;
+              packetToClient.exchange = "updated to "+packetFromClient.quote+".";
+            }
+          }
+          catch (NullPointerException e) {
+            packetToClient = new BrokerPacket();
+            packetToClient.type = BrokerPacket.ERROR_INVALID_SYMBOL;
+          }
+          System.out.println("From Exchange: Update "+packetFromClient.symbol+" to "+packetFromClient.quote);
+          toClient.writeObject(packetToClient);
+          continue;
+        }
+        else if (packetFromClient.type == BrokerPacket.EXCHANGE_REMOVE) {
+          try {
+            long symbolExist = hm.get(packetFromClient.symbol);
+
+            hm.remove(packetFromClient.symbol);
+            packetToClient = new BrokerPacket();
+            packetToClient.type = BrokerPacket.EXCHANGE_REPLY;
+            packetToClient.exchange = "removed.";
+          }
+          catch (NullPointerException e) {
+            packetToClient = new BrokerPacket();
+            packetToClient.type = BrokerPacket.ERROR_INVALID_SYMBOL;
+          }
+          System.out.println("From Exchange: Remove " + packetFromClient.symbol);
+          toClient.writeObject(packetToClient);
           continue;
         }
 
@@ -68,7 +117,7 @@ public class BrokerServerHandlerThread extends Thread {
         }
 
         /* if code comes here, there is an error in the packet */
-        System.err.println("ERROR: Unknown ECHO_* packet!!");
+        System.err.println("ERROR: Unknown BROKER_* packet!!");
         System.exit(-1);
       }
 

@@ -66,7 +66,7 @@ public class BrokerExchange {
       packetFromServer = (BrokerPacket) in.readObject();
 
       if (packetFromServer.type == BrokerPacket.EXCHANGE_REPLY) {
-        System.out.println(packetFromServer.exchange);       
+        System.out.println(userInputList[1]+" "+packetFromServer.exchange);       
       }
       else if (packetFromServer.type == BrokerPacket.ERROR_INVALID_SYMBOL) {
         System.out.println(userInputList[1]+" invalid.");
